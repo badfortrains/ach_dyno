@@ -1,0 +1,39 @@
+{
+  "name": "calf-dyno-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:rules": "vitest run --config vitest.rules.config.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "firebase": "^13.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "@playwright/test": "^1.64.0",
+    "@sveltejs/adapter-static": "^4.0.0",
+    "@sveltejs/kit": "^3.0.1",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "fake-indexeddb": "^6.2.5",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.3"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}

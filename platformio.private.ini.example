@@ -1,0 +1,7 @@
+; Copy to platformio.private.ini (git-ignored). Never commit the real file.
+[dyno]
+ota_password = replace-with-a-strong-private-password
+; Optional, 8-63 characters. Otherwise a random password is printed over USB.
+setup_password =
+; Optional additional EXACT origins separated by commas, with no trailing slash.
+extra_origins =

@@ -1,4 +1,4 @@
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyDr_E68O6pnfWDWpTorV5500G8_YIEV7go",
   authDomain: "ach-dyno.firebaseapp.com",
   projectId: "ach-dyno",
