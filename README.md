@@ -87,6 +87,17 @@ Open `http://localhost:5173`. Click **Try demo** to test charting, recording, hi
 
 Firebase web configuration is exported from `web/config.ts`; it identifies the Firebase project and is not an OTA/Wi-Fi secret. Browser-only Firebase initialization happens after mounting. The app is a client-rendered SvelteKit SPA using the static adapter; production output is `web/build`.
 
+### Formatting
+
+The dashboard uses [Prettier](https://prettier.io/docs/cli) with [the Svelte plugin](https://github.com/sveltejs/prettier-plugin-svelte) to format Svelte, TypeScript, HTML, CSS, and JSON consistently. Run from the repository root:
+
+```sh
+npm --prefix web run format       # Rewrite web source and configuration files
+npm --prefix web run format:check # Check formatting without changing files
+```
+
+The shared settings are in `web/.prettierrc.json`; generated output, dependencies, test artifacts, environment files, and the generated lockfile are excluded in `web/.prettierignore`. Editor integrations can use these same project settings.
+
 ### Run workflow and recovery
 
 1. Connect, calibrate if needed, and zero the unloaded sensor.

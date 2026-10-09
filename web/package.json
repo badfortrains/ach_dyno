@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
@@ -21,6 +23,8 @@
     "@sveltejs/kit": "^3.0.1",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "fake-indexeddb": "^6.2.5",
+    "prettier": "3.9.9",
+    "prettier-plugin-svelte": "4.1.1",
     "svelte": "^5.57.2",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
