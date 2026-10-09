@@ -77,20 +77,34 @@ test('exercises device commands and preserves a run across socket loss and recon
   try {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Connect device', exact: false }).click();
+    await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+    const distance = page.getByLabel('Pivot to dowel center (inches)');
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeDisabled();
+    await distance.fill('0');
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeDisabled();
+    await distance.fill('6.625');
+    await expect(page.locator('.force-display')).toContainText('291.0');
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled();
     await page.getByRole('button', { name: 'Zero sensor', exact: false }).click();
     await expect(page.getByRole('status')).toContainText('Sensor updated and saved');
     await page.getByRole('button', { name: 'Start recording' }).click();
     await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible();
+    await expect(distance).toBeDisabled();
     await page.waitForTimeout(300);
     for (const interval of intervals) clearInterval(interval); intervals.clear();
     link!.close({ code: 1001, reason: 'Simulated power loss' });
     await expect(page.getByRole('status')).toContainText('Device connection lost');
     await expect(page.getByText('Local backup', { exact: true })).toBeVisible();
+    await expect(page.getByRole('table')).toContainText('Foot force · dowel 6.625 in');
+    await distance.fill('13.25');
+    await expect(page.getByRole('table')).toContainText('291.0');
     await expect(page.getByText('Connected', { exact: true })).toBeVisible();
     expect(connections).toBeGreaterThanOrEqual(2);
     await expect(page.getByRole('button', { name: 'Stop recording' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(distance).toHaveValue('13.25');
+    await expect(page.getByRole('table')).toContainText('Foot force · dowel 6.625 in');
   } finally {
     for (const interval of intervals) clearInterval(interval);
     for (const timer of timers) clearTimeout(timer);
@@ -124,6 +138,7 @@ test('explains the initial calibration lock and enables calibration after an unl
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Connect device', exact: false }).click();
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByLabel('Pivot to dowel center (inches)').fill('6.625');
   await page.getByText('Sensor calibration & connection help', { exact: true }).click();
   const panel = page.locator('details.calibration');
   const calibrate = panel.getByRole('button', { name: 'Calibrate', exact: true });
@@ -135,8 +150,11 @@ test('explains the initial calibration lock and enables calibration after an unl
   await expect(calibrate).toBeDisabled();
   await expect(panel.locator('#calibration-reason')).toContainText('greater than 0');
   await page.getByLabel('Known mass (kg)').fill('5');
+  await panel.getByRole('button', { name: 'Use current dowel distance' }).click();
+  await expect(page.getByLabel('Pivot to calibration load (inches)')).toHaveValue('6.625');
   await calibrate.click();
   await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled();
-  expect(calibratedMass).toBe(5);
+  await expect(page.locator('.force-display')).toContainText('98.1');
+  expect(calibratedMass).toBe(2.5);
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
 });

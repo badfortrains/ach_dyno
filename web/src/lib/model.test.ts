@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Recorder, MAX_SAMPLES, deviceAddress, parseMessage, toCloud, fromCloud, validateRun, runCsv, type DeviceSample } from './model';
+import { Recorder, MAX_SAMPLES, CELL_DISTANCE_IN, footForce, validGeometry, calibrationCellMass, deviceAddress, parseMessage, toCloud, fromCloud, validateRun, runCsv, type DeviceSample } from './model';
 const sample = (seq = 1, ms = 100, forceN: number | null = 0, bootId = 123): DeviceSample => ({ type: 'sample', seq, ms, forceN, bootId, raw: 12000 });
 function recorder(first = sample()) { return new Recorder(first, 'left', 'seated_plantarflexion', 'device', 'alice', 'test-run'); }
 function completed() {
@@ -69,5 +69,36 @@ describe('persistence and export', () => {
     const csv = runCsv(run);
     expect(csv.split('\r\n')).toHaveLength(5); expect(csv).toContain('"\'=1+1,""hello"""');
     expect(csv).toContain(',50,100\r\n');
+  });
+});
+describe('pedal lever correction', () => {
+  const geometry = { cellDistanceIn: CELL_DISTANCE_IN, footDistanceIn: 6.625 };
+  it('balances moments, preserving the sign of the cell force', () => {
+    expect(footForce(100, geometry)).toBe(200);
+    expect(footForce(-2, geometry)).toBe(-4);
+    expect(footForce(100, { ...geometry, footDistanceIn: 13.25 })).toBe(100);
+    for (const distance of [0, -1, 14, NaN, Infinity]) expect(validGeometry({ ...geometry, footDistanceIn: distance })).toBe(false);
+  });
+  it('converts a pedal calibration mass to the equivalent cell mass', () => {
+    expect(calibrationCellMass(5, 6.625)).toBe(2.5);
+    expect(calibrationCellMass(5, 13.25)).toBe(5);
+    for (const distance of [0, -1, 14, NaN]) expect(() => calibrationCellMass(5, distance)).toThrow();
+  });
+  it('freezes geometry per run and preserves it through cloud and CSV', () => {
+    const input = { ...geometry };
+    const r = new Recorder(sample(), 'left', 'seated_plantarflexion', 'device', null, 'lever-run', input);
+    input.footDistanceIn = 13.25;
+    r.add(sample(1, 100, -2)); r.add(sample(2, 150, 100));
+    const run = r.finish('Stopped');
+    expect(run.samples).toEqual([[0, -4], [50, 200]]);
+    expect(run.peakForceN).toBe(200);
+    expect(run.geometry).toEqual(geometry);
+    const cloud = toCloud(run);
+    expect(cloud.schemaVersion).toBe(2);
+    expect(fromCloud(run.id, cloud).geometry).toEqual(geometry);
+    expect(runCsv(run)).toContain('"foot",13.25,6.625,50,200');
+    expect(() => fromCloud(run.id, { ...cloud, geometry: { ...geometry, footDistanceIn: 0 } })).toThrow();
+    expect(() => fromCloud(run.id, { ...cloud, schemaVersion: 1 })).toThrow();
+    expect(fromCloud(completed().id, toCloud(completed())).geometry).toBeUndefined();
   });
 });

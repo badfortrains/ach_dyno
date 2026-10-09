@@ -1,0 +1,44 @@
+[
+  {
+    "part": "base",
+    "triangles": 868,
+    "closed_manifold": true,
+    "connected_components": 1,
+    "volume_mm3": 29457.29874679835,
+    "bounds_mm": [
+      [
+        0.0,
+        90.0
+      ],
+      [
+        0.0,
+        65.0
+      ],
+      [
+        0.0,
+        32.0
+      ]
+    ]
+  },
+  {
+    "part": "lid",
+    "triangles": 668,
+    "closed_manifold": true,
+    "connected_components": 1,
+    "volume_mm3": 12449.803137660745,
+    "bounds_mm": [
+      [
+        0.0,
+        90.0
+      ],
+      [
+        0.0,
+        65.0
+      ],
+      [
+        0.0,
+        16.0
+      ]
+    ]
+  }
+]

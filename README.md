@@ -45,6 +45,8 @@ Install PlatformIO. Its VS Code extension includes the `pio` CLI. On this Mac it
 5. A brand-new device may report that LittleFS is unavailable. Send `fs-init CONFIRM` once over USB to initialize the calibration filesystem. Firmware does **not** automatically format a filesystem that fails to mount. Until initialized, calibration works in RAM and reports that it could not be saved to flash.
 6. Unload the sensor in its fixture and send `t` (or use **Zero sensor** in the dashboard). Hold still for about one second while 20 readings are averaged. Apply a known mass and send `c 5.0`, replacing 5.0 with your mass in kg (or use the dashboard calibration controls). The applied force must follow the sensor axis; account for any lever/pulley ratio.
 
+If the dashboard reports **updated in RAM only / flash save failed** on a newly flashed device, keep it powered so its current calibration is retained, connect USB, open `pio device monitor -b 115200`, and send `fs-init CONFIRM` followed by Enter. Expect **Calibration filesystem initialized and current calibration saved.** This command formats the calibration filesystem (erasing any old calibration file), then saves the calibration currently in RAM; it does not reset Wi-Fi credentials. If connecting USB or opening the monitor restarts the device, repeat tare and calibration after initializing storage. After success, power-cycle, reconnect, and confirm the device still reports calibrated. If initialization or saving fails again, retain the exact USB error for diagnosis; repeatedly formatting is not a fix for a write or hardware failure.
+
 Calibration accepts either bridge polarity, rejects saturation and tiny signals, and preserves the slope when taring again. Loaded readings are positive in the calibrated direction; opposite loads are negative. Calibration survives resets once the filesystem is initialized. Re-tare with the fixture unloaded before a session.
 
 Serial commands at **115200 baud**, followed by Enter:
@@ -88,9 +90,19 @@ Firebase web configuration is exported from `web/config.ts`; it identifies the F
 ### Run workflow and recovery
 
 1. Connect, calibrate if needed, and zero the unloaded sensor.
-2. Select a leg/exercise and start recording.
+2. Measure from the hinge pivot axis to the **center of the dowel under the ball of your foot**, enter that distance in inches, select a leg/exercise, and start recording. The heel aligns with the pivot; pivot-to-heel distance is not the foot lever arm.
 3. Stop to review the trace, then export CSV or click **Save** after signing in.
 4. Select a history row to inspect its raw trace. History loads 50 runs at a time; use **Load earlier runs** for more.
+
+### Hinged pedal and foot force
+
+The pivot-to-S-beam attachment distance is **13.25 inches**. With the pedal still and both forces vertical, torque balance gives `footForceN = cellForceN × 13.25 / pivotToDowelIn`. For example, a 100 N cell reading with the dowel 6.625 inches from the pivot means 200 N applied at the dowel. This measures force at the ball of the foot, not internal Achilles tendon force. The calculation assumes negligible hinge friction, no contact with a pedal stop, and heel load applied at the hinge axis. Keep the cell aligned vertically and pressure downward at the dowel. See [OpenStax on static equilibrium and torque](https://openstax.org/books/university-physics-volume-1/pages/12-1-conditions-for-static-equilibrium).
+
+The dashboard requires a positive pivot-to-dowel distance no greater than 13.25 inches before recording device runs. It remembers the last distance in this browser, locks it during recording, and saves a snapshot with each run. Live force, recorded samples, peaks, and charts use calculated **foot force**; the live panel also shows cell tension. Moving the dowel clears the rolling live trace, and previously recorded runs retain their original geometry. Older runs without geometry remain labeled **cell force** and are excluded from the latest-foot-force comparisons.
+
+To calibrate the assembled pedal, zero with the pedal and dowel installed and no foot or added mass. Rest a stable known mass at a measured position on the pedal, enter its actual mass and **pivot-to-calibration-load distance**, then calibrate. **Use current dowel distance** fills that distance when the mass is centered on the dowel. The UI sends `massKg × calibrationLoadDistanceIn / 13.25` to the existing firmware, so firmware force stays cell tension. For a load applied directly to the S-beam, use 13.25 inches. A previous calibration made with a mass on the pedal at a different distance needs repeating with its correct position before using this conversion.
+
+Deploy **Hosting and Firestore rules together** for this UI (`firebase deploy --only firestore:rules,hosting --project ach-dyno`); firmware does not need updating. New corrected runs use cloud schema 2 with `geometry: { cellDistanceIn: 13.25, footDistanceIn: <measurement> }`. Schema 1 runs remain readable and retryable. CSV includes force basis and both distances alongside the samples, so exports distinguish foot, cell, and simulated forces.
 
 Every completed run is written to IndexedDB **before** any cloud save. Recording checkpoints commit about once per second. A browser crash/power loss recovers the last committed checkpoint; the newest approximately one second may not have committed. Normal stop, connection loss, sample gap, restart, sensor fault, calibration change, account change, or backgrounding the page finalize the samples already received. No missing samples are invented or interpolated in stored data.
 

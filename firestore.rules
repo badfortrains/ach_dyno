@@ -13,8 +13,12 @@ service cloud.firestore {
       return d.keys().hasAll(['timestamp', 'leg', 'exercise', 'durationMs', 'sampleRateHz',
           'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion']) &&
         d.keys().hasOnly(['timestamp', 'leg', 'exercise', 'durationMs', 'sampleRateHz',
-          'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion']) &&
-        d.schemaVersion == 1 && d.timestamp is string &&
+          'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion', 'geometry']) &&
+        ((d.schemaVersion == 1 && !('geometry' in d)) || (d.schemaVersion == 2 &&
+          d.geometry is map && d.geometry.keys().hasAll(['cellDistanceIn', 'footDistanceIn']) &&
+          d.geometry.keys().hasOnly(['cellDistanceIn', 'footDistanceIn']) &&
+          d.geometry.cellDistanceIn == 13.25 && d.geometry.footDistanceIn is number &&
+          d.geometry.footDistanceIn > 0 && d.geometry.footDistanceIn <= 13.25)) && d.timestamp is string &&
         d.timestamp.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$') &&
         d.leg in ['left', 'right'] && d.exercise is string && d.exercise.size() > 0 && d.exercise.size() <= 80 &&
         d.durationMs is number && d.durationMs >= 0 && d.durationMs <= 300000 &&

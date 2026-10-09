@@ -14,6 +14,19 @@ beforeAll(async () => {
 beforeEach(() => env.clearFirestore());
 afterAll(() => env?.cleanup());
 describe('personal measurement rules', () => {
+  it('accepts lever runs and rejects invalid or unversioned geometry', async () => {
+    const ref = doc(env.authenticatedContext('alice').firestore(), 'users/alice/runs/lever');
+    const geometry = { cellDistanceIn: 13.25, footDistanceIn: 6.625 };
+    const run = { ...valid(), schemaVersion: 2, geometry };
+    await assertSucceeds(setDoc(ref, run)); await assertSucceeds(setDoc(ref, run));
+    await assertSucceeds(deleteDoc(ref));
+    for (const patch of [{ schemaVersion: 1 }, { geometry: { ...geometry, footDistanceIn: 0 } },
+      { geometry: { ...geometry, footDistanceIn: 14 } }, { geometry: { ...geometry, cellDistanceIn: 10 } },
+      { geometry: { ...geometry, extra: 1 } }, { geometry: null }]) {
+      await assertFails(setDoc(ref, { ...run, ...patch }));
+    }
+    await assertFails(setDoc(ref, { ...valid(), schemaVersion: 2 }));
+  });
   it('allows an owner to save, read, list, retry, and delete their run', async () => {
     const db = env.authenticatedContext('alice').firestore(), ref = doc(db, 'users/alice/runs/test');
     await assertSucceeds(setDoc(ref, valid())); await assertSucceeds(getDoc(ref));

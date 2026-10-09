@@ -38,6 +38,7 @@ uint8_t operationCount = 0;
 double calibrationMass = 0;
 int operationClient = -1;
 String operationId;
+const char *calibrationSaveError = "Sensor updated in RAM only; flash save failed.";
 
 void selectAdc() {
   SPI.beginTransaction(ADC_SPI);
@@ -118,14 +119,30 @@ void reply(int client, const String &id, bool ok, const char *message) {
   String output; serializeJson(doc, output); socket.sendTXT(client, output);
 }
 bool saveCalibration() {
-  if (!fsReady) return false;
+  if (!fsReady) {
+    calibrationSaveError = "Sensor updated in RAM only; calibration filesystem unavailable. On a new device, send fs-init CONFIRM over USB at 115200 baud to initialize storage and save current calibration.";
+    return false;
+  }
   JsonDocument doc; doc["version"] = 1; doc["tareCounts"] = tareCounts;
   doc["countsPerKg"] = countsPerKg; doc["hasTare"] = hasTare;
   doc["calibrated"] = calibrated;
   File file = LittleFS.open("/calibration.tmp", "w");
-  if (!file) return false;
-  bool ok = serializeJson(doc, file) > 0; file.close();
-  return ok && LittleFS.rename("/calibration.tmp", "/calibration.json");
+  if (!file) {
+    calibrationSaveError = "Sensor updated in RAM only; could not open the calibration file on flash. Check USB logs and filesystem space.";
+    return false;
+  }
+  size_t expected = measureJson(doc);
+  size_t written = serializeJson(doc, file);
+  file.flush(); file.close();
+  if (written != expected) {
+    calibrationSaveError = "Sensor updated in RAM only; calibration file write was incomplete. Check USB logs and filesystem space.";
+    return false;
+  }
+  if (!LittleFS.rename("/calibration.tmp", "/calibration.json")) {
+    calibrationSaveError = "Sensor updated in RAM only; replacing the calibration file on flash failed. Check USB logs and filesystem space.";
+    return false;
+  }
+  return true;
 }
 void loadCalibration() {
   if (!fsReady) return;
@@ -175,7 +192,7 @@ void processSample(int32_t sample) {
         countsPerKg = net / calibrationMass; calibrated = true;
       }
       bool stored = saveCalibration();
-      finishOperation(true, stored ? "Sensor updated and saved to flash." : "Sensor updated in RAM only; flash save failed.");
+      finishOperation(true, stored ? "Sensor updated and saved to flash." : calibrationSaveError);
     }
     return;
   }
@@ -247,7 +264,9 @@ void serialCommand(char *command) {
     if (otaActive || operation != Operation::None) { Serial.println(F("Sensor busy; try again later.")); return; }
     LittleFS.end();
     fsReady = LittleFS.format() && LittleFS.begin();
-    Serial.println(fsReady && saveCalibration() ? F("Calibration filesystem initialized and current calibration saved.") : F("Filesystem initialization failed."));
+    if (!fsReady) Serial.println(F("Filesystem initialization failed; calibration remains in RAM only."));
+    else if (!saveCalibration()) Serial.println(calibrationSaveError);
+    else Serial.println(F("Calibration filesystem initialized and current calibration saved."));
   }
   else if (!strcmp(command, "t")) startOperation(Operation::Tare, 0);
   else if (!strcmp(command, "r")) {
@@ -281,7 +300,7 @@ void setup() {
   fsReady = LittleFS.begin();
   if (!fsReady) {
     // A brand new filesystem can be initialized deliberately via USB, see README.
-    Serial.println(F("LittleFS unavailable; calibration will be RAM-only. See README for initialization."));
+    Serial.println(F("LittleFS unavailable; calibration will be RAM-only. On a new device, send fs-init CONFIRM to initialize storage and save current calibration."));
   }
   loadCalibration(); adcReady = initializeAdc(); printHelp();
   setupPassword = DYNO_SETUP_PASSWORD;

@@ -3,6 +3,26 @@ export type Leg = 'left' | 'right';
 export type Source = 'device' | 'demo';
 export const MAX_SAMPLES = 6000;
 export const MAX_DURATION_MS = 300_000;
+export const CELL_DISTANCE_IN = 13.25;
+export interface LeverGeometry { cellDistanceIn: number; footDistanceIn: number }
+export function validGeometry(value: unknown): value is LeverGeometry {
+  if (!value || typeof value !== 'object') return false;
+  const g = value as LeverGeometry;
+  return Object.keys(g).length === 2 && finite(g.cellDistanceIn) && g.cellDistanceIn === CELL_DISTANCE_IN &&
+    finite(g.footDistanceIn) && g.footDistanceIn > 0 && g.footDistanceIn <= CELL_DISTANCE_IN;
+}
+export function footForce(cellForceN: number, geometry: LeverGeometry): number {
+  if (!validGeometry(geometry)) throw new Error('Enter a pivot-to-dowel distance greater than 0 and no more than 13.25 inches.');
+  return cellForceN * geometry.cellDistanceIn / geometry.footDistanceIn;
+}
+export function calibrationCellMass(massKg: number, loadDistanceIn: number): number {
+  if (!finite(massKg) || massKg <= 0 || massKg > 10000 || !finite(loadDistanceIn) || loadDistanceIn <= 0 || loadDistanceIn > CELL_DISTANCE_IN) {
+    throw new Error('Enter a valid known mass and calibration load distance.');
+  }
+  const equivalent = massKg * loadDistanceIn / CELL_DISTANCE_IN;
+  if (!finite(equivalent) || equivalent <= 0) throw new Error('Calibration load is too small at the cell.');
+  return equivalent;
+}
 export interface Run {
   id: string;
   timestamp: string;
@@ -14,6 +34,7 @@ export interface Run {
   samples: Sample[];
   source: Source;
   stopReason: string;
+  geometry?: LeverGeometry;
 }
 export interface LocalRun extends Run {
   state: 'recording' | 'pending' | 'saved';
@@ -76,6 +97,7 @@ export function validateRun(value: unknown): value is Run {
       !finite(r.peakForceN) || !['device', 'demo'].includes(r.source) ||
       typeof r.stopReason !== 'string' || r.stopReason.length > 200 ||
       !Array.isArray(r.samples) || !r.samples.length || r.samples.length > MAX_SAMPLES) return false;
+  if (r.geometry !== undefined && !validGeometry(r.geometry)) return false;
   let previous = -1, peak = 0;
   for (const s of r.samples) {
     if (!Array.isArray(s) || s.length !== 2 || !finite(s[0]) || !finite(s[1]) ||
@@ -88,21 +110,25 @@ export class Recorder {
   readonly run: LocalRun;
   private last: DeviceSample;
   private startMs: number;
-  constructor(first: DeviceSample, leg: Leg, exercise: string, source: Source, ownerUid: string | null, id: string) {
+  constructor(first: DeviceSample, leg: Leg, exercise: string, source: Source, ownerUid: string | null, id: string, geometry?: LeverGeometry) {
+    if (geometry && !validGeometry(geometry)) throw new Error('Invalid lever geometry');
     this.startMs = first.ms; this.last = first;
     this.run = { id, timestamp: new Date().toISOString(), leg, exercise,
       durationMs: 0, sampleRateHz: 0, peakForceN: 0, samples: [], source,
       stopReason: '', state: 'recording', ownerUid };
+    if (geometry) this.run.geometry = { ...geometry };
   }
   add(sample: DeviceSample): string | null {
     if (sample.forceN === null || !Number.isFinite(sample.forceN) || Math.abs(sample.forceN) > 1e7) return 'Invalid or uncalibrated sample';
+    const forceN = this.run.geometry ? footForce(sample.forceN, this.run.geometry) : sample.forceN;
+    if (!Number.isFinite(forceN) || Math.abs(forceN) > 1e7) return 'Invalid calculated foot force';
     if (sample.bootId !== this.last.bootId) return 'Device restarted';
     const elapsed = (sample.ms - this.startMs) >>> 0;
     if (this.run.samples.length && ((sample.seq - this.last.seq) >>> 0) !== 1) return 'Sample stream interrupted';
     if (elapsed > MAX_DURATION_MS || this.run.samples.length >= MAX_SAMPLES) return 'Recording limit reached';
     if (this.run.samples.length && elapsed <= this.run.durationMs) return 'Device timestamp changed';
-    this.run.samples.push([elapsed, sample.forceN]);
-    this.run.durationMs = elapsed; this.run.peakForceN = Math.max(this.run.peakForceN, sample.forceN);
+    this.run.samples.push([elapsed, forceN]);
+    this.run.durationMs = elapsed; this.run.peakForceN = Math.max(this.run.peakForceN, forceN);
     this.last = sample;
     if (this.run.samples.length >= MAX_SAMPLES || elapsed >= MAX_DURATION_MS) return 'Recording limit reached';
     return null;
@@ -122,11 +148,13 @@ export function toCloud(run: Run) {
   // Explicit field list avoids sending IndexedDB state/owner metadata.
   return { timestamp: rest.timestamp, leg: rest.leg, exercise: rest.exercise,
     durationMs: rest.durationMs, sampleRateHz: rest.sampleRateHz, peakForceN: rest.peakForceN,
-    source: rest.source, stopReason: rest.stopReason, schemaVersion: 1,
+    source: rest.source, stopReason: rest.stopReason, schemaVersion: rest.geometry ? 2 : 1,
+    ...(rest.geometry ? { geometry: { ...rest.geometry } } : {}),
     samples: rest.samples.map(([t, f]) => ({ t, f })) };
 }
 export function fromCloud(id: string, data: Record<string, unknown>): Run {
-  if (data.schemaVersion !== 1 || !Array.isArray(data.samples)) throw new Error('Unsupported run format');
+  if (![1, 2].includes(data.schemaVersion as number) || !Array.isArray(data.samples) ||
+      (data.schemaVersion === 2 ? !validGeometry(data.geometry) : data.geometry !== undefined)) throw new Error('Unsupported run format');
   const run = { ...data, id, samples: data.samples.map(s => [s?.t, s?.f]) };
   if (!validateRun(run)) throw new Error('Invalid saved run');
   return run;
@@ -137,7 +165,9 @@ function csvCell(value: string): string {
   return `"${safe.replaceAll('"', '""')}"`;
 }
 export function runCsv(run: Run): string {
-  const header = 'run_id,timestamp,leg,exercise,source,elapsed_ms,force_n';
+  const header = 'run_id,timestamp,leg,exercise,source,force_basis,pivot_to_cell_in,pivot_to_dowel_in,elapsed_ms,force_n';
   return [header, ...run.samples.map(([t, f]) =>
-    [run.id, run.timestamp, run.leg, run.exercise, run.source].map(csvCell).join(',') + `,${t},${f}`)].join('\r\n') + '\r\n';
+    [run.id, run.timestamp, run.leg, run.exercise, run.source,
+      run.source === 'demo' ? 'simulated' : run.geometry ? 'foot' : 'cell'].map(csvCell).join(',') +
+      `,${run.geometry?.cellDistanceIn ?? ''},${run.geometry?.footDistanceIn ?? ''},${t},${f}`)].join('\r\n') + '\r\n';
 }
