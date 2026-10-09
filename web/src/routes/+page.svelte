@@ -10,6 +10,10 @@
     validGeometry,
     footForce,
     calibrationCellMass,
+    ankleTorque,
+    torquePerKg,
+    validBodyMass,
+    MAX_BODY_MASS_KG,
     type DeviceSample,
     type DeviceStatus,
     type Leg,
@@ -34,6 +38,12 @@
     raw = $state<number | null>(null),
     lastSampleAt = $state(0);
   let footDistance = $state<number | undefined>(undefined);
+  let bodyMass = $state<number | undefined>(undefined);
+  let bodyMassError = $derived(
+    bodyMass !== undefined && !validBodyMass(bodyMass)
+      ? 'Enter a weight greater than 0 and up to 1000 kg, or leave it blank.'
+      : '',
+  );
   let calibrationDistance = $state<number | undefined>(CELL_DISTANCE_IN);
   let geometry = $derived(
     validGeometry({
@@ -109,6 +119,19 @@
         ? `Foot force · dowel ${run.geometry.footDistanceIn} in`
         : 'Cell force · original run';
   let currentTrace = $derived(selected ? selected.samples : liveSamples);
+  let liveTorque = $derived(
+    force === null ? null : ankleTorque(force, geometry),
+  );
+  let liveTorquePerKg = $derived(torquePerKg(liveTorque, bodyMass));
+  let peakTorque = $derived(
+    ankleTorque(
+      selected?.peakForceN ?? peak,
+      selected ? selected.geometry : geometry,
+    ),
+  );
+  let peakTorquePerKg = $derived(
+    torquePerKg(peakTorque, selected ? selected.bodyMassKg : bodyMass),
+  );
   let canRecord = $derived(
     connection === 'connected' &&
       status?.adcReady &&
@@ -118,6 +141,7 @@
       !commandWorking &&
       storageReady &&
       !storageError &&
+      !bodyMassError &&
       force !== null &&
       Number.isFinite(force) &&
       Math.abs(force) <= 1e7 &&
@@ -257,7 +281,8 @@
       mode,
       mode === 'device' ? (user?.uid ?? null) : null,
       crypto.randomUUID(),
-      mode === 'device' ? geometry : undefined,
+      geometry,
+      bodyMass,
     );
     recorder.add(latest);
     liveSamples = [...recorder.run.samples];
@@ -774,12 +799,42 @@
             >{commandWorking ? 'Working…' : '↺ Zero sensor'}</button
           >
         </div>
+        <div class="live-torque" aria-label="Live ankle torque">
+          <div>
+            <span>ANKLE TORQUE</span><strong
+              >{liveTorque === null ? '—' : liveTorque.toFixed(1)}<small>
+                N·m</small
+              ></strong
+            >
+          </div>
+          <div>
+            <span>TORQUE / KG</span><strong
+              >{liveTorquePerKg === null
+                ? '—'
+                : liveTorquePerKg.toFixed(2)}<small> N·m/kg</small></strong
+            >
+          </div>
+        </div>
         <div class="metric-row">
           <div>
             <span>PEAK FORCE</span><strong
               >{(selected?.peakForceN ?? peak).toFixed(1)}<small>
                 N</small
               ></strong
+            >
+          </div>
+          <div data-testid="peak-torque">
+            <span>PEAK ANKLE TORQUE</span><strong
+              >{peakTorque === null ? '—' : peakTorque.toFixed(1)}<small>
+                N·m</small
+              ></strong
+            >
+          </div>
+          <div data-testid="peak-torque-per-kg">
+            <span>PEAK TORQUE / KG</span><strong
+              >{peakTorquePerKg === null
+                ? '—'
+                : peakTorquePerKg.toFixed(2)}<small> N·m/kg</small></strong
             >
           </div>
           <div>
@@ -794,6 +849,12 @@
               >{selected?.samples.length ?? runSamples}<small>
                 raw</small
               ></strong
+            >
+          </div>
+          <div data-testid="run-body-mass">
+            <span>BODY WEIGHT</span><strong
+              >{(selected ? selected.bodyMassKg : bodyMass)?.toFixed(1) ??
+                '—'}<small> kg</small></strong
             >
           </div>
         </div>
@@ -871,7 +932,7 @@
             placeholder="Enter measured distance"
             bind:value={footDistance}
             oninput={updateGeometry}
-            disabled={recording || mode === 'demo'}
+            disabled={recording}
             aria-describedby="lever-help"
           />
           <p id="lever-help">
@@ -885,6 +946,35 @@
               : geometry
                 ? `Foot force = cell tension × ${(CELL_DISTANCE_IN / geometry.footDistanceIn).toFixed(3)}`
                 : 'Enter a distance greater than 0 and up to 13.25 inches.'}
+          </p>
+        </div>
+        <div class="body-weight">
+          <label for="body-mass">Body weight (kg, optional)</label>
+          <input
+            id="body-mass"
+            type="number"
+            min="0.001"
+            max={MAX_BODY_MASS_KG}
+            step="any"
+            placeholder="Leave blank if unknown"
+            value={bodyMass ?? ''}
+            oninput={(event) => {
+              bodyMass = Number.isNaN(event.currentTarget.valueAsNumber)
+                ? undefined
+                : event.currentTarget.valueAsNumber;
+            }}
+            disabled={recording}
+            aria-describedby="body-mass-help"
+            aria-invalid={!!bodyMassError}
+          />
+          <p id="body-mass-help">
+            {bodyMassError ||
+              'Saved with this run. Weight is only needed for torque per kg.'}
+          </p>
+          <p>
+            Ankle torque = foot force × pivot-to-dowel distance in meters.
+            Assumes your ankle is centered on the pivot and force acts
+            perpendicular to the lever arm.
           </p>
         </div>
         <div class="run-instructions">
@@ -905,13 +995,15 @@
         <p class="footnote">
           {recording
             ? 'Keep this page open while recording.'
-            : !storageReady
-              ? 'Preparing local backups…'
-              : !status?.calibrated && mode === 'device'
-                ? 'Connect and calibrate the sensor to begin.'
-                : mode === 'device' && !geometry
-                  ? 'Enter your pivot-to-dowel distance to begin.'
-                  : 'Runs are backed up locally. Save to your account after recording.'}
+            : bodyMassError
+              ? bodyMassError
+              : !storageReady
+                ? 'Preparing local backups…'
+                : !status?.calibrated && mode === 'device'
+                  ? 'Connect and calibrate the sensor to begin.'
+                  : mode === 'device' && !geometry
+                    ? 'Enter your pivot-to-dowel distance to begin.'
+                    : 'Runs are backed up locally. Save to your account after recording.'}
         </p>
         <details class="calibration">
           <summary>Sensor calibration & connection help</summary>
@@ -1043,6 +1135,8 @@
               <thead
                 ><tr
                   ><th>Recorded</th><th>Leg / exercise</th><th>Peak force</th
+                  ><th>Peak ankle torque</th><th>Torque / kg</th><th
+                    >Body weight</th
                   ><th>Duration</th><th>Status</th><th
                     ><span class="sr-only">Actions</span></th
                   ></tr
@@ -1064,7 +1158,20 @@
                       >{run.peakForceN.toFixed(1)} <small>N</small><small
                         class="exercise-label">{forceBasis(run)}</small
                       ></td
-                    ><td>{(run.durationMs / 1000).toFixed(1)}s</td><td
+                    ><td
+                      >{ankleTorque(run.peakForceN, run.geometry)?.toFixed(1) ??
+                        '—'} <small>N·m</small></td
+                    >
+                    <td
+                      >{torquePerKg(
+                        ankleTorque(run.peakForceN, run.geometry),
+                        run.bodyMassKg,
+                      )?.toFixed(2) ?? '—'} <small>N·m/kg</small></td
+                    >
+                    <td
+                      >{run.bodyMassKg?.toFixed(1) ?? '—'} <small>kg</small></td
+                    >
+                    <td>{(run.durationMs / 1000).toFixed(1)}s</td><td
                       ><span class="save-state"
                         >{run.source === 'demo'
                           ? 'Demo · local'
@@ -1455,11 +1562,49 @@
     font-size: 11px;
   }
   .metric-row {
-    display: flex;
-    gap: 40px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px 16px;
     padding: 21px 0;
     border-top: 1px solid #edf0e9;
     border-bottom: 1px solid #edf0e9;
+  }
+  .live-torque {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  .live-torque span {
+    display: block;
+    font-size: 9px;
+    font-weight: 650;
+    color: #8a9689;
+    letter-spacing: 1px;
+    margin-bottom: 9px;
+  }
+  .live-torque strong {
+    font-size: 27px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .live-torque small {
+    font-size: 11px;
+    font-weight: 400;
+    color: #8a9689;
+  }
+  .body-weight {
+    margin-top: 22px;
+  }
+  .body-weight input {
+    width: 100%;
+    font-size: 12px;
+  }
+  .body-weight p {
+    font-size: 11px;
+    line-height: 1.7;
+    color: #7c887c;
+    margin: 10px 0;
   }
   .metric-row span {
     display: block;
@@ -1871,7 +2016,7 @@
       min-width: 130px;
     }
     .metric-row {
-      justify-content: space-between;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .run-panel {
       padding: 24px;

@@ -48,6 +48,28 @@ beforeAll(async () => {
 beforeEach(() => env.clearFirestore());
 afterAll(() => env?.cleanup());
 describe('personal measurement rules', () => {
+  it('allows optional body weight and rejects invalid weights', async () => {
+    const ref = doc(
+      env.authenticatedContext('alice').firestore(),
+      'users/alice/runs/weight',
+    );
+    for (const run of [
+      valid(),
+      {
+        ...valid(),
+        schemaVersion: 2,
+        geometry: { cellDistanceIn: 13.25, footDistanceIn: 6.625 },
+      },
+    ]) {
+      await assertSucceeds(setDoc(ref, { ...run, bodyMassKg: 70 }));
+      await assertSucceeds(getDoc(ref));
+      await assertSucceeds(setDoc(ref, { ...run, bodyMassKg: 70 }));
+      await assertFails(setDoc(ref, { ...run, bodyMassKg: 80 }));
+      await assertSucceeds(deleteDoc(ref));
+      for (const weight of [0, -1, 1001, '70', null])
+        await assertFails(setDoc(ref, { ...run, bodyMassKg: weight }));
+    }
+  });
   it('accepts lever runs and rejects invalid or unversioned geometry', async () => {
     const ref = doc(
       env.authenticatedContext('alice').firestore(),

@@ -4,6 +4,11 @@ export type Source = 'device' | 'demo';
 export const MAX_SAMPLES = 6000;
 export const MAX_DURATION_MS = 300_000;
 export const CELL_DISTANCE_IN = 13.25;
+export const INCHES_TO_METERS = 0.0254;
+export const MAX_BODY_MASS_KG = 1000;
+export function validBodyMass(value: unknown): value is number {
+  return finite(value) && value > 0 && value <= MAX_BODY_MASS_KG;
+}
 export interface LeverGeometry {
   cellDistanceIn: number;
   footDistanceIn: number;
@@ -26,6 +31,22 @@ export function footForce(cellForceN: number, geometry: LeverGeometry): number {
       'Enter a pivot-to-dowel distance greater than 0 and no more than 13.25 inches.',
     );
   return (cellForceN * geometry.cellDistanceIn) / geometry.footDistanceIn;
+}
+export function ankleTorque(
+  forceN: number,
+  geometry?: LeverGeometry,
+): number | null {
+  return geometry && validGeometry(geometry) && finite(forceN)
+    ? forceN * geometry.footDistanceIn * INCHES_TO_METERS
+    : null;
+}
+export function torquePerKg(
+  torqueNm: number | null,
+  bodyMassKg?: number,
+): number | null {
+  return torqueNm !== null && finite(torqueNm) && validBodyMass(bodyMassKg)
+    ? torqueNm / bodyMassKg
+    : null;
 }
 export function calibrationCellMass(
   massKg: number,
@@ -58,6 +79,7 @@ export interface Run {
   source: Source;
   stopReason: string;
   geometry?: LeverGeometry;
+  bodyMassKg?: number;
 }
 export interface LocalRun extends Run {
   state: 'recording' | 'pending' | 'saved';
@@ -213,6 +235,7 @@ export function validateRun(value: unknown): value is Run {
   )
     return false;
   if (r.geometry !== undefined && !validGeometry(r.geometry)) return false;
+  if (r.bodyMassKg !== undefined && !validBodyMass(r.bodyMassKg)) return false;
   let previous = -1,
     peak = 0;
   for (const s of r.samples) {
@@ -244,9 +267,12 @@ export class Recorder {
     ownerUid: string | null,
     id: string,
     geometry?: LeverGeometry,
+    bodyMassKg?: number,
   ) {
     if (geometry && !validGeometry(geometry))
       throw new Error('Invalid lever geometry');
+    if (bodyMassKg !== undefined && !validBodyMass(bodyMassKg))
+      throw new Error('Invalid body weight');
     this.startMs = first.ms;
     this.last = first;
     this.run = {
@@ -264,6 +290,7 @@ export class Recorder {
       ownerUid,
     };
     if (geometry) this.run.geometry = { ...geometry };
+    if (bodyMassKg !== undefined) this.run.bodyMassKg = bodyMassKg;
   }
   add(sample: DeviceSample): string | null {
     if (
@@ -272,9 +299,10 @@ export class Recorder {
       Math.abs(sample.forceN) > 1e7
     )
       return 'Invalid or uncalibrated sample';
-    const forceN = this.run.geometry
-      ? footForce(sample.forceN, this.run.geometry)
-      : sample.forceN;
+    const forceN =
+      this.run.source === 'device' && this.run.geometry
+        ? footForce(sample.forceN, this.run.geometry)
+        : sample.forceN;
     if (!Number.isFinite(forceN) || Math.abs(forceN) > 1e7)
       return 'Invalid calculated foot force';
     if (sample.bootId !== this.last.bootId) return 'Device restarted';
@@ -322,6 +350,7 @@ export function toCloud(run: Run) {
     stopReason: rest.stopReason,
     schemaVersion: rest.geometry ? 2 : 1,
     ...(rest.geometry ? { geometry: { ...rest.geometry } } : {}),
+    ...(rest.bodyMassKg !== undefined ? { bodyMassKg: rest.bodyMassKg } : {}),
     samples: rest.samples.map(([t, f]) => ({ t, f })),
   };
 }
@@ -345,12 +374,13 @@ function csvCell(value: string): string {
 }
 export function runCsv(run: Run): string {
   const header =
-    'run_id,timestamp,leg,exercise,source,force_basis,pivot_to_cell_in,pivot_to_dowel_in,elapsed_ms,force_n';
+    'run_id,timestamp,leg,exercise,source,force_basis,pivot_to_cell_in,pivot_to_dowel_in,elapsed_ms,force_n,body_mass_kg,ankle_torque_nm,ankle_torque_nm_per_kg';
   return (
     [
       header,
-      ...run.samples.map(
-        ([t, f]) =>
+      ...run.samples.map(([t, f]) => {
+        const torque = ankleTorque(f, run.geometry);
+        return (
           [
             run.id,
             run.timestamp,
@@ -365,8 +395,9 @@ export function runCsv(run: Run): string {
           ]
             .map(csvCell)
             .join(',') +
-          `,${run.geometry?.cellDistanceIn ?? ''},${run.geometry?.footDistanceIn ?? ''},${t},${f}`,
-      ),
+          `,${run.geometry?.cellDistanceIn ?? ''},${run.geometry?.footDistanceIn ?? ''},${t},${f},${run.bodyMassKg ?? ''},${torque ?? ''},${torquePerKg(torque, run.bodyMassKg) ?? ''}`
+        );
+      }),
     ].join('\r\n') + '\r\n'
   );
 }

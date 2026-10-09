@@ -100,7 +100,7 @@ test('rejects invalid device addresses and provides a connection diagnostic page
 
 test('exercises device commands and preserves a run across socket loss and reconnect', async ({
   page,
-}) => {
+}, info) => {
   const status = {
     type: 'status',
     protocol: 1,
@@ -183,6 +183,18 @@ test('exercises device commands and preserves a run across socket loss and recon
     ).toBeDisabled();
     await distance.fill('6.625');
     await expect(page.locator('.force-display')).toContainText('291.0');
+    const weight = page.getByLabel('Body weight (kg, optional)');
+    await expect(page.getByLabel('Live ankle torque')).toContainText('49.0');
+    await weight.fill('0');
+    await expect(
+      page.getByRole('button', { name: 'Start recording' }),
+    ).toBeDisabled();
+    await weight.fill('');
+    await expect(
+      page.getByRole('button', { name: 'Start recording' }),
+    ).toBeEnabled();
+    await weight.fill('70');
+    await expect(page.getByLabel('Live ankle torque')).toContainText('0.70');
     await expect(
       page.getByRole('button', { name: 'Start recording' }),
     ).toBeEnabled();
@@ -197,6 +209,7 @@ test('exercises device commands and preserves a run across socket loss and recon
       page.getByRole('button', { name: 'Stop recording' }),
     ).toBeVisible();
     await expect(distance).toBeDisabled();
+    await expect(weight).toBeDisabled();
     await page.waitForTimeout(300);
     for (const interval of intervals) clearInterval(interval);
     intervals.clear();
@@ -208,7 +221,17 @@ test('exercises device commands and preserves a run across socket loss and recon
     await expect(page.getByRole('table')).toContainText(
       'Foot force · dowel 6.625 in',
     );
+    await expect(page.getByTestId('peak-torque')).toContainText('49.0');
+    await expect(page.getByTestId('peak-torque-per-kg')).toContainText('0.70');
+    await expect(page.getByTestId('run-body-mass')).toContainText('70.0');
     await distance.fill('13.25');
+    await weight.fill('90');
+    await expect(page.getByTestId('run-body-mass')).toContainText('70.0');
+    await expect(page.getByTestId('peak-torque-per-kg')).toContainText('0.70');
+    await page.screenshot({
+      path: `test-results/${info.project.name}-torque.png`,
+      fullPage: true,
+    });
     await expect(page.getByRole('table')).toContainText('291.0');
     await expect(page.getByText('Connected', { exact: true })).toBeVisible();
     expect(connections).toBeGreaterThanOrEqual(2);
@@ -221,6 +244,9 @@ test('exercises device commands and preserves a run across socket loss and recon
     await expect(page.getByRole('table')).toContainText(
       'Foot force · dowel 6.625 in',
     );
+    await page.getByRole('table').getByRole('button').first().click();
+    await expect(page.getByTestId('run-body-mass')).toContainText('70.0');
+    await expect(page.getByTestId('peak-torque-per-kg')).toContainText('0.70');
   } finally {
     for (const interval of intervals) clearInterval(interval);
     for (const timer of timers) clearTimeout(timer);
@@ -328,6 +354,9 @@ test('explains the initial calibration lock and enables calibration after an unl
     page.getByRole('button', { name: 'Start recording' }),
   ).toBeEnabled();
   await expect(page.locator('.force-display')).toContainText('98.1');
+  await expect(page.getByLabel('Live ankle torque')).toContainText('16.5');
+  await expect(page.getByLabel('Body weight (kg, optional)')).toHaveValue('');
+  await expect(page.getByLabel('Live ankle torque')).toContainText('—');
   expect(calibratedMass).toBe(2.5);
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
 });

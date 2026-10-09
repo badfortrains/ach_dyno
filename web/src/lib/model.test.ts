@@ -6,6 +6,9 @@ import {
   footForce,
   validGeometry,
   calibrationCellMass,
+  ankleTorque,
+  torquePerKg,
+  validBodyMass,
   deviceAddress,
   parseMessage,
   toCloud,
@@ -160,7 +163,7 @@ describe('persistence and export', () => {
     const csv = runCsv(run);
     expect(csv.split('\r\n')).toHaveLength(5);
     expect(csv).toContain('"\'=1+1,""hello"""');
-    expect(csv).toContain(',50,100\r\n');
+    expect(csv).toContain(',50,100,,,\r\n');
   });
 });
 describe('pedal lever correction', () => {
@@ -173,6 +176,64 @@ describe('pedal lever correction', () => {
       expect(validGeometry({ ...geometry, footDistanceIn: distance })).toBe(
         false,
       );
+  });
+  it('calculates ankle torque in meters and optionally normalizes by body mass', () => {
+    const torque = ankleTorque(200, geometry);
+    expect(torque).toBeCloseTo(33.655);
+    expect(torquePerKg(torque, 70)).toBeCloseTo(0.480785714);
+    expect(ankleTorque(-2, geometry)).toBeCloseTo(-0.33655);
+    expect(ankleTorque(200)).toBeNull();
+    expect(torquePerKg(torque)).toBeNull();
+    for (const weight of [0, -1, NaN, Infinity, 1001]) {
+      expect(validBodyMass(weight)).toBe(false);
+      expect(torquePerKg(torque, weight)).toBeNull();
+    }
+    const farther = { ...geometry, footDistanceIn: 13.25 };
+    expect(ankleTorque(footForce(100, farther), farther)).toBeCloseTo(torque!);
+  });
+  it('snapshots optional body weight, persists it and exports torque columns', () => {
+    const r = new Recorder(
+      sample(),
+      'left',
+      'seated_plantarflexion',
+      'device',
+      null,
+      'weighted-run',
+      geometry,
+      70,
+    );
+    r.add(sample(1, 100, 100));
+    const run = r.finish('Stopped');
+    expect(run.bodyMassKg).toBe(70);
+    expect(fromCloud(run.id, toCloud(run)).bodyMassKg).toBe(70);
+    const [header, row] = runCsv(run)
+      .trim()
+      .split('\r\n')
+      .map((line) => line.split(','));
+    expect(Number(row[header.indexOf('body_mass_kg')])).toBe(70);
+    expect(Number(row[header.indexOf('ankle_torque_nm')])).toBeCloseTo(33.655);
+    expect(Number(row[header.indexOf('ankle_torque_nm_per_kg')])).toBeCloseTo(
+      33.655 / 70,
+    );
+    expect(toCloud(completed())).not.toHaveProperty('bodyMassKg');
+    for (const weight of [0, -1, NaN, Infinity, 1001, null, '70']) {
+      expect(validateRun({ ...run, bodyMassKg: weight })).toBe(false);
+      expect(() =>
+        fromCloud(run.id, { ...toCloud(run), bodyMassKg: weight }),
+      ).toThrow();
+    }
+    const demo = new Recorder(
+      sample(),
+      'left',
+      'seated_plantarflexion',
+      'demo',
+      null,
+      'demo-torque',
+      geometry,
+      70,
+    );
+    demo.add(sample(1, 100, 100));
+    expect(demo.finish('Stopped').peakForceN).toBe(100);
   });
   it('converts a pedal calibration mass to the equivalent cell mass', () => {
     expect(calibrationCellMass(5, 6.625)).toBe(2.5);

@@ -13,7 +13,8 @@ service cloud.firestore {
       return d.keys().hasAll(['timestamp', 'leg', 'exercise', 'durationMs', 'sampleRateHz',
           'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion']) &&
         d.keys().hasOnly(['timestamp', 'leg', 'exercise', 'durationMs', 'sampleRateHz',
-          'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion', 'geometry']) &&
+          'peakForceN', 'samples', 'source', 'stopReason', 'schemaVersion', 'geometry', 'bodyMassKg']) &&
+        (!('bodyMassKg' in d) || (d.bodyMassKg is number && d.bodyMassKg > 0 && d.bodyMassKg <= 1000)) &&
         ((d.schemaVersion == 1 && !('geometry' in d)) || (d.schemaVersion == 2 &&
           d.geometry is map && d.geometry.keys().hasAll(['cellDistanceIn', 'footDistanceIn']) &&
           d.geometry.keys().hasOnly(['cellDistanceIn', 'footDistanceIn']) &&
